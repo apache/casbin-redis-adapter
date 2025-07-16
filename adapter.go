@@ -40,6 +40,25 @@ type CasbinRule struct {
 	V5    string
 }
 
+// Config represents the configuration for the Redis adapter.
+type Config struct {
+	// Network is the network type, e.g., "tcp", "unix"
+	Network string
+	// Address is the Redis server address, e.g., "127.0.0.1:6379"
+	Address string
+	// Key is the Redis key to store Casbin rules (default: "casbin_rules")
+	Key string
+	// Username for Redis authentication (optional)
+	Username string
+	// Password for Redis authentication (optional)
+	Password string
+	// TLSConfig for secure connections (optional)
+	TLSConfig *tls.Config
+	// Pool is an existing Redis connection pool (optional)
+	// If provided, Network, Address, Username, Password, and TLSConfig are ignored
+	Pool *redis.Pool
+}
+
 // Adapter represents the Redis adapter for policy storage.
 type Adapter struct {
 	network    string
@@ -78,53 +97,45 @@ func finalizer(a *Adapter) {
 	}
 }
 
-func newAdapter(network string, address string, key string,
-	username string, password string) (*Adapter, error) {
+// NewAdapter creates a new Redis adapter with the provided configuration.
+func NewAdapter(config *Config) (*Adapter, error) {
+	if config == nil {
+		return nil, errors.New("config cannot be nil")
+	}
+
 	a := &Adapter{}
-	a.network = network
-	a.address = address
-	a.key = key
-	a.username = username
-	a.password = password
 
-	// Open the DB, create it if not existed.
-	err := a.open()
+	// Set default key if not provided
+	if config.Key == "" {
+		a.key = "casbin_rules"
+	} else {
+		a.key = config.Key
+	}
 
-	// Call the destructor when the object is released.
-	runtime.SetFinalizer(a, finalizer)
+	// If a pool is provided, use it
+	if config.Pool != nil {
+		a._pool = config.Pool
+	} else {
+		// Otherwise, create a new connection
+		if config.Network == "" {
+			return nil, errors.New("network is required when not using a pool")
+		}
+		if config.Address == "" {
+			return nil, errors.New("address is required when not using a pool")
+		}
 
-	return a, err
-}
+		a.network = config.Network
+		a.address = config.Address
+		a.username = config.Username
+		a.password = config.Password
+		a.tlsConfig = config.TLSConfig
 
-// NewAdapter is the constructor for Adapter.
-func NewAdapter(network string, address string) (*Adapter, error) {
-	return newAdapter(network, address, "casbin_rules", "", "")
-}
-
-func NewAdapterWithUser(network string, address string, username string, password string) (*Adapter, error) {
-	return newAdapter(network, address, "casbin_rules", username, password)
-}
-
-// NewAdapterWithPassword is the constructor for Adapter.
-func NewAdapterWithPassword(network string, address string, password string) (*Adapter, error) {
-	return newAdapter(network, address, "casbin_rules", "", password)
-}
-
-// NewAdapterWithKey is the constructor for Adapter.
-func NewAdapterWithKey(network string, address string, key string) (*Adapter, error) {
-	return newAdapter(network, address, key, "", "")
-}
-
-// NewAdapterWithPool is the constructor for Adapter.
-func NewAdapterWithPool(pool *redis.Pool) (*Adapter, error) {
-	a := &Adapter{}
-	a.key = "casbin_rules"
-
-	conn := pool.Get()
-	defer a.release(conn)
-
-	a._conn = conn
-	a._pool = pool
+		// Open the DB connection
+		err := a.open()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// Call the destructor when the object is released.
 	runtime.SetFinalizer(a, finalizer)
@@ -132,40 +143,102 @@ func NewAdapterWithPool(pool *redis.Pool) (*Adapter, error) {
 	return a, nil
 }
 
-// NewAdapterWithPoolAndOptions is the constructor for Adapter.
+// Legacy constructor functions (deprecated)
+// These are kept for backward compatibility but should be avoided in new code
+
+// NewAdapterBasic is the basic constructor for Adapter.
+// Deprecated: Use NewAdapter with Config struct instead.
+func NewAdapterBasic(network string, address string) (*Adapter, error) {
+	config := &Config{
+		Network: network,
+		Address: address,
+	}
+	return NewAdapter(config)
+}
+
+// NewAdapterWithUser creates adapter with user credentials.
+// Deprecated: Use NewAdapter with Config struct instead.
+func NewAdapterWithUser(network string, address string, username string, password string) (*Adapter, error) {
+	config := &Config{
+		Network:  network,
+		Address:  address,
+		Username: username,
+		Password: password,
+	}
+	return NewAdapter(config)
+}
+
+// NewAdapterWithPassword creates adapter with password authentication.
+// Deprecated: Use NewAdapter with Config struct instead.
+func NewAdapterWithPassword(network string, address string, password string) (*Adapter, error) {
+	config := &Config{
+		Network:  network,
+		Address:  address,
+		Password: password,
+	}
+	return NewAdapter(config)
+}
+
+// NewAdapterWithKey creates adapter with custom key.
+// Deprecated: Use NewAdapter with Config struct instead.
+func NewAdapterWithKey(network string, address string, key string) (*Adapter, error) {
+	config := &Config{
+		Network: network,
+		Address: address,
+		Key:     key,
+	}
+	return NewAdapter(config)
+}
+
+// NewAdapterWithPool creates adapter with connection pool.
+// Deprecated: Use NewAdapter with Config struct instead.
+func NewAdapterWithPool(pool *redis.Pool) (*Adapter, error) {
+	config := &Config{
+		Pool: pool,
+	}
+	return NewAdapter(config)
+}
+
+// NewAdapterWithPoolAndOptions creates adapter with pool and options.
+// Deprecated: Use NewAdapter with Config struct instead.
 func NewAdapterWithPoolAndOptions(pool *redis.Pool, options ...Option) (*Adapter, error) {
-	a := &Adapter{}
-	a.key = "casbin_rules"
+	config := &Config{
+		Pool: pool,
+	}
+	a, err := NewAdapter(config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply options for backward compatibility
 	for _, option := range options {
 		option(a)
 	}
-
-	conn := pool.Get()
-	defer a.release(conn)
-
-	a._conn = conn
-	a._pool = pool
-
-	// Call the destructor when the object is released.
-	runtime.SetFinalizer(a, finalizer)
 
 	return a, nil
 }
 
 type Option func(*Adapter)
 
+// NewAdapterWithOption creates adapter with options pattern.
+// Deprecated: Use NewAdapter with Config struct instead.
 func NewAdapterWithOption(options ...Option) (*Adapter, error) {
 	a := &Adapter{}
 	for _, option := range options {
 		option(a)
 	}
-	// Open the DB, create it if not existed.
-	err := a.open()
 
-	// Call the destructor when the object is released.
-	runtime.SetFinalizer(a, finalizer)
+	// Convert to new config-based approach
+	config := &Config{
+		Network:   a.network,
+		Address:   a.address,
+		Key:       a.key,
+		Username:  a.username,
+		Password:  a.password,
+		TLSConfig: a.tlsConfig,
+	}
 
-	return a, err
+	return NewAdapter(config)
 }
 
 func WithAddress(address string) Option {
@@ -191,6 +264,7 @@ func WithNetwork(network string) Option {
 		a.network = network
 	}
 }
+
 func WithKey(key string) Option {
 	return func(a *Adapter) {
 		a.key = key

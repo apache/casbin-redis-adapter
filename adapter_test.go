@@ -354,7 +354,7 @@ func arrayEqualsWithoutOrder(a [][]string, b [][]string) bool {
 }
 
 func TestAdapters(t *testing.T) {
-	a, _ := NewAdapter("tcp", "127.0.0.1:6379")
+	a, _ := NewAdapterBasic("tcp", "127.0.0.1:6379")
 
 	// Use the following if Redis has password like "123"
 	// a, err := NewAdapterWithPassword("tcp", "127.0.0.1:6379", "123")

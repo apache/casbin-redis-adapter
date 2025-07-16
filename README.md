@@ -15,7 +15,21 @@ Redis Adapter is the [Redis](https://redis.io/) adapter for [Casbin](https://git
 
     go get github.com/casbin/redis-adapter/v3
 
-## Simple Example
+## Configuration Options
+
+The `Config` struct supports the following options:
+
+- `Network` (string): Network type, e.g., "tcp", "unix" (required when not using Pool)
+- `Address` (string): Redis server address, e.g., "127.0.0.1:6379" (required when not using Pool)
+- `Key` (string): Redis key to store Casbin rules (default: "casbin_rules")
+- `Username` (string): Username for Redis authentication (optional)
+- `Password` (string): Password for Redis authentication (optional)
+- `TLSConfig` (*tls.Config): TLS configuration for secure connections (optional)
+- `Pool` (*redis.Pool): Existing Redis connection pool (optional, if provided, other connection options are ignored)
+
+## Usage Examples
+
+### Basic Usage
 
 ```go
 package main
@@ -26,28 +40,23 @@ import (
 )
 
 func main() {
-	// Direct Initialization:
-	// Initialize a Redis adapter and use it in a Casbin enforcer:
-	a, _ := redisadapter.NewAdapter("tcp", "127.0.0.1:6379") // Your Redis network and address.
+	// Recommended approach using Config
+	config := &redisadapter.Config{Network: "tcp", Address: "127.0.0.1:6379"}
+	a, _ := redisadapter.NewAdapter(config)
 
-	// Use the following if Redis has password like "123"
-	// a, err := redisadapter.NewAdapterWithPassword("tcp", "127.0.0.1:6379", "123")
+	// With password authentication
+	// config := &redisadapter.Config{Network: "tcp", Address: "127.0.0.1:6379", Password: "123"}
+	// a, _ := redisadapter.NewAdapter(config)
 
-	// Use the following if you use Redis with a specific user 
-	// a, err := redisadapter.NewAdapterWithUser("tcp", "127.0.0.1:6379", "username", "password")
+	// With user credentials
+	// config := &redisadapter.Config{Network: "tcp", Address: "127.0.0.1:6379", Username: "user", Password: "pass"}
+	// a, _ := redisadapter.NewAdapter(config)
 
-	// Use the following if you use Redis connections pool
-	// pool := &redis.Pool{}
-	// a, err := redisadapter.NewAdapterWithPool(pool)
-
-	// Initialization with different user options:
-	// Use the following if you use Redis with passowrd like "123":
-	// a, err := redisadapter.NewAdapterWithOption(redisadapter.WithNetwork("tcp"), redisadapter.WithAddress("127.0.0.1:6379"), redisadapter.WithPassword("123"))
-
-	// Use the following if you use Redis with username, password, and TLS option:
+	// With TLS configuration
 	// var clientTLSConfig tls.Config
 	// ...
-	// a, err := redisadapter.NewAdapterWithOption(redisadapter.WithNetwork("tcp"), redisadapter.WithAddress("127.0.0.1:6379"), redisadapter.WithUsername("testAccount"), redisadapter.WithPassword("123456"), redisadapter.WithTls(&clientTLSConfig))
+	// config := &redisadapter.Config{Network: "tcp", Address: "127.0.0.1:6379", Username: "testAccount", Password: "123456", TLSConfig: &clientTLSConfig}
+	// a, _ := redisadapter.NewAdapter(config)
 
 	e, _ := casbin.NewEnforcer("examples/rbac_model.conf", a)
 
@@ -60,6 +69,35 @@ func main() {
 	// Modify the policy.
 	// e.AddPolicy(...)
 	// e.RemovePolicy(...)
+
+	// Save the policy back to DB.
+	e.SavePolicy()
+}
+```
+
+### With Connection Pool
+
+```go
+package main
+
+import (
+	"github.com/casbin/casbin/v2"
+	"github.com/casbin/redis-adapter/v3"
+	"github.com/gomodule/redigo/redis"
+)
+
+func main() {
+	pool := &redis.Pool{Dial: func() (redis.Conn, error) { return redis.Dial("tcp", "127.0.0.1:6379") }}
+	config := &redisadapter.Config{Pool: pool, Key: "casbin_rules"}
+	a, _ := redisadapter.NewAdapter(config)
+
+	e, _ := casbin.NewEnforcer("examples/rbac_model.conf", a)
+	
+	// Load the policy from DB.
+	e.LoadPolicy()
+
+	// Check the permission.
+	e.Enforce("alice", "data1", "read")
 
 	// Save the policy back to DB.
 	e.SavePolicy()
